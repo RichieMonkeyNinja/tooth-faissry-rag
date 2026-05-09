@@ -3,3 +3,6 @@ test/
 __pycache__/
 *.pyc
 *.csv
+.agents
+AGENTS.md
+skills-lock.json

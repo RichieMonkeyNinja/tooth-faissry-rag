@@ -8,5 +8,6 @@ dependencies = [
     "datasets>=4.8.5",
     "faiss-cpu>=1.13.2",
     "langchain>=1.2.18",
+    "langchain-text-splitters>=1.1.2",
     "pandas>=3.0.2",
 ]
