@@ -6,3 +6,5 @@ __pycache__/
 .agents
 AGENTS.md
 skills-lock.json
+.env
+data/
