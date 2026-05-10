@@ -18,13 +18,18 @@ def load_csv_documents(path: str | Path) -> list[Document]:
     for row_index, row in df.iterrows():
         documents.append(
             Document(
-                page_content=f"Question: {row['question']}\nExplanation: {row['exp']}",
-                metadata={
-                    "source": str(path),
-                    "row_index": int(row_index),
-                    "question": row["question"],
-                    "doc_type": "medmcqa",
-                },
+                page_content=(
+                    f"Question: {row['question']}\n"
+                    f"Correct Answer Text: {row['correct_ans']}\n"
+                    # f"Explanation: {row['exp']}"
+                )
+                # metadata={
+                #     "source": str(path),
+                #     "row_index": int(row_index),
+                #     "question": row["question"],
+                #     "correct_answer": row["correct_ans"],
+                #     "doc_type": "medmcqa",
+                # },
             )
         )
 
@@ -32,7 +37,7 @@ def load_csv_documents(path: str | Path) -> list[Document]:
 
 
 def build_vectorstore(documents: list[Document], save_dir: str | Path) -> FAISS:
-    embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
+    embeddings = OpenAIEmbeddings(model="text-embedding-3-large")
     vectorstore = FAISS.from_documents(documents, embeddings)
 
     save_path = Path(save_dir)

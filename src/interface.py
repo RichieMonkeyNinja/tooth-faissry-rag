@@ -36,6 +36,12 @@ def render_diagnostics() -> None:
 
     st.write(f"Accepted: `{result['accepted']}`")
     st.write(f"Score: `{result['score']:.4f}`")
+    st.write(f"Vector score: `{result.get('vector_score', 0.0):.4f}`")
+    st.write(f"BM25 score: `{result.get('bm25_score', 0.0):.4f}`")
+    st.write(f"BM25 score softmax: `{result.get('bm25_score_softmax', 0.0):.4f}`")
+    st.write(f"Hybrid score: `{result.get('hybrid_score', 0.0):.4f}`")
+    rerank_score = result.get("rerank_score")
+    st.write(f"Rerank score: `{rerank_score:.4f}`" if rerank_score is not None else "Rerank score: `None`")
     st.write(f"Threshold: `{RELEVANCE_THRESHOLD:.2f}`")
     st.write("Retrieved chunk:")
     st.code(result["retrieved_chunk"] or "None", language="text")
@@ -50,7 +56,7 @@ def main() -> None:
     init_session_state()
 
     st.title("MedMCQA Retrieval Chatbot")
-    st.caption("Answers are generated only from the nearest retrieved context in the FAISS index.")
+    st.caption("Answers are generated from hybrid FAISS and BM25 retrieval after cross-encoder reranking.")
 
     chat_col, diagnostics_col = st.columns([2, 1], gap="large")
     vectorstore = get_vectorstore()

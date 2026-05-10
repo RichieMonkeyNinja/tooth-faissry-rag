@@ -1,4 +1,4 @@
-from datasets import concatenate_datasets, load_dataset
+from datasets_rag import concatenate_datasets, load_dataset
 
 ds = load_dataset("openlifescienceai/medmcqa")
 

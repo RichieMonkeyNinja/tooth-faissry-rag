@@ -14,7 +14,20 @@ from datasets import concatenate_datasets, load_dataset
 ds = load_dataset("openlifescienceai/medmcqa")
 
 combined = concatenate_datasets([ds["train"], ds["validation"]])
-combined = combined.select_columns(["question", "exp"])
+combined = combined.filter(lambda row: row["subject_name"] == "Dental")
+combined = combined.map(
+    lambda row: {
+        "correct_ans": {
+            0: row["opa"],
+            1: row["opb"],
+            2: row["opc"],
+            3: row["opd"],
+        }.get(row["cop"], "")
+    }
+)
+combined = combined.select_columns(
+    ["question", "opa", "opb", "opc", "opd", "cop", "correct_ans", "exp"]
+)
 output_path = project_root / "data/raw/medmcqa_data.csv"
 combined.to_csv(str(output_path), index=False)
 
