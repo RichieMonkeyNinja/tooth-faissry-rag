@@ -7,4 +7,8 @@ __pycache__/
 AGENTS.md
 skills-lock.json
 .env
-data/
+data/*
+!data/evals/
+data/evals/*
+!data/evals/README.md
+!data/evals/qa_eval.csv

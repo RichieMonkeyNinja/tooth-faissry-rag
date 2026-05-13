@@ -1,7 +1,15 @@
 import streamlit as st
 from dotenv import load_dotenv
 
-from retrieval import RELEVANCE_THRESHOLD, VECTORSTORE_DIR, answer_question, load_vectorstore
+from retrieval import (
+    RELEVANCE_THRESHOLD,
+    NO_GROUNDED_ANSWER_MESSAGE,
+    SOURCE_FILTER_ALL,
+    SOURCE_FILTER_OPTIONS,
+    VECTORSTORE_DIR,
+    answer_question,
+    load_vectorstore,
+)
 
 
 st.set_page_config(page_title="MedMCQA RAG Chatbot", page_icon=":stethoscope:", layout="wide")
@@ -35,6 +43,7 @@ def render_diagnostics() -> None:
         return
 
     st.write(f"Accepted: `{result['accepted']}`")
+    st.write(f"Source filter: `{result.get('source_filter', SOURCE_FILTER_ALL)}`")
     st.write(f"Score: `{result['score']:.4f}`")
     st.write(f"Vector score: `{result.get('vector_score', 0.0):.4f}`")
     st.write(f"BM25 score: `{result.get('bm25_score', 0.0):.4f}`")
@@ -62,6 +71,11 @@ def main() -> None:
     vectorstore = get_vectorstore()
 
     with chat_col:
+        source_filter = st.selectbox(
+            "Retrieval source",
+            options=SOURCE_FILTER_OPTIONS,
+            index=SOURCE_FILTER_OPTIONS.index(SOURCE_FILTER_ALL),
+        )
         render_messages()
         question = st.chat_input("Ask a medical question")
 
@@ -70,13 +84,13 @@ def main() -> None:
             with st.chat_message("user"):
                 st.markdown(question)
 
-            result = answer_question(question, vectorstore)
+            result = answer_question(question, vectorstore, source_filter=source_filter)
             st.session_state.latest_result = result
 
             if result["accepted"]:
                 assistant_message = result["answer"]
             else:
-                assistant_message = "No sufficiently similar context was found in the database, so no grounded answer was generated."
+                assistant_message = NO_GROUNDED_ANSWER_MESSAGE
 
             st.session_state.messages.append({"role": "assistant", "content": assistant_message})
             with st.chat_message("assistant"):
