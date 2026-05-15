@@ -8,6 +8,11 @@ AGENTS.md
 skills-lock.json
 .env
 data/*
+!data/raw/
+data/raw/*
+!data/raw/pdf/
+!data/raw/pdf/**
+
 !data/evals/
 data/evals/*
 !data/evals/README.md
