@@ -16,8 +16,8 @@ MARKDOWN_DIR = Path("data/processed/pdf_markdown")
 VECTORSTORE_DIR = Path("data/vectorstores/mixed")
 
 EMBEDDING_MODEL = "text-embedding-3-small"
-CHUNK_SIZE = 900
-CHUNK_OVERLAP = 120
+CHUNK_SIZE = 600
+CHUNK_OVERLAP = 100
 MINERU_MODE = "flash"
 
 SOURCE_TYPE_CSV = "medmcqa"
@@ -101,6 +101,7 @@ def chunk_pdf_documents(pdf_documents: list[Document]) -> list[Document]:
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=CHUNK_SIZE,
         chunk_overlap=CHUNK_OVERLAP,
+        separators=["\n\n", "\n", ". ", " "]
     )
     chunked_documents: list[Document] = []
 

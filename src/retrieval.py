@@ -1,6 +1,7 @@
 import argparse
 from functools import lru_cache
 from pathlib import Path
+import re
 import sys
 from typing import Any
 
@@ -32,6 +33,10 @@ HYBRID_ALPHA = 0.5
 NO_GROUNDED_ANSWER_MESSAGE = (
     "No sufficiently similar context was found in the database, so no grounded answer was generated."
 )
+
+
+def preprocess_bm25(text: str) -> list[str]:
+    return re.findall(r"\b\w+\b", text.lower())
 
 
 def softmax_normalize(scores: dict[str, float], temperature: float = 1.0) -> dict[str, float]:
@@ -80,7 +85,10 @@ def load_keyword_retriever(source_filter: str = SOURCE_FILTER_ALL) -> BM25Retrie
         for document in load_index_documents()
         if document_source_matches(document, source_filter)
     ]
-    retriever = BM25Retriever.from_documents(filtered_documents)
+    retriever = BM25Retriever.from_documents(
+        filtered_documents,
+        preprocess_func=preprocess_bm25,
+    )
     retriever.k = BM25_RETRIEVAL_K
     return retriever
 
@@ -139,6 +147,8 @@ def retrieve_nearest_chunk(
 
     bm25_retriever = load_keyword_retriever(source_filter)
     bm25_results = bm25_retriever.invoke(question)
+    processed_query = bm25_retriever.preprocess_func(question)
+    raw_bm25_scores = bm25_retriever.vectorizer.get_scores(processed_query)
 
     if not vector_results and not bm25_results:
         return {
@@ -160,7 +170,10 @@ def retrieve_nearest_chunk(
     vector_scores_by_chunk = {
         document.page_content: float(score) for document, score in vector_results
     }
-    bm25_scores_by_chunk: dict[str, float] = {}
+    bm25_scores_by_chunk = {
+        document.page_content: float(score)
+        for document, score in zip(bm25_retriever.docs, raw_bm25_scores, strict=True)
+    }
     merged_documents: dict[str, Document] = {}
 
     for document, _ in vector_results:
@@ -170,7 +183,6 @@ def retrieve_nearest_chunk(
     for rank, document in enumerate(bm25_results, start=1):
         chunk = document.page_content
         merged_documents.setdefault(chunk, document)
-        bm25_scores_by_chunk[chunk] = float(BM25_RETRIEVAL_K - rank + 1)
 
     vector_scores_for_candidates = {
         chunk: vector_scores_by_chunk.get(chunk, 0.0) for chunk in merged_documents
