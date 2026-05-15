@@ -12,7 +12,7 @@ from retrieval import (
 )
 
 
-st.set_page_config(page_title="MedMCQA RAG Chatbot", page_icon=":stethoscope:", layout="wide")
+st.set_page_config(page_title="Tooth FAISSry: RAG Chatbot", page_icon=":stethoscope:", layout="wide")
 
 
 @st.cache_resource
@@ -64,39 +64,48 @@ def render_diagnostics() -> None:
 def main() -> None:
     init_session_state()
 
-    st.title("MedMCQA Retrieval Chatbot")
-    st.caption("Answers are generated from hybrid FAISS and BM25 retrieval after cross-encoder reranking.")
+    st.markdown("""
+        <style>
+        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&family=DM+Mono&display=swap');
+        
+        html, body, [class*="css"] {
+            font-family: 'DM Sans', sans-serif;
+        }
+        .stChatMessage {
+            border-radius: 12px;
+            padding: 8px;
+        }
+        </style>
+    """, unsafe_allow_html=True)
+        
+    st.title("Tooth FAISSry Chatbot: A RAG-powered Dental Knowledge Assistant")
+    st.caption("Document Sources: MedMCQA; California Dental Association ")
 
-    chat_col, diagnostics_col = st.columns([2, 1], gap="large")
     vectorstore = get_vectorstore()
 
-    with chat_col:
-        source_filter = st.selectbox(
-            "Retrieval source",
-            options=SOURCE_FILTER_OPTIONS,
-            index=SOURCE_FILTER_OPTIONS.index(SOURCE_FILTER_ALL),
-        )
-        render_messages()
-        question = st.chat_input("Ask a medical question")
+    render_messages()
+    question = st.chat_input("Ask a dental question: e.g. What are the causes of bad breath?")
 
-        if question:
-            st.session_state.messages.append({"role": "user", "content": question})
-            with st.chat_message("user"):
-                st.markdown(question)
+    if question:
+        st.session_state.messages.append({"role": "user", "content": question})
+        with st.chat_message("user"):
+            st.markdown(question)
 
-            result = answer_question(question, vectorstore, source_filter=source_filter)
-            st.session_state.latest_result = result
+        with st.spinner("Retrieving answer..."):
+                result = answer_question(question, vectorstore, source_filter='all')
+        st.session_state.latest_result = result
 
-            if result["accepted"]:
-                assistant_message = result["answer"]
-            else:
-                assistant_message = NO_GROUNDED_ANSWER_MESSAGE
+        if result["accepted"]:
+            assistant_message = result["answer"]
+        else:
+            assistant_message = NO_GROUNDED_ANSWER_MESSAGE
 
-            st.session_state.messages.append({"role": "assistant", "content": assistant_message})
-            with st.chat_message("assistant"):
-                st.markdown(assistant_message)
+        st.session_state.messages.append({"role": "assistant", "content": assistant_message})
+        with st.chat_message("assistant"):
+            st.markdown(assistant_message)
 
-    with diagnostics_col:
+    with st.sidebar:
+        st.header("🔬 Diagnostics")
         render_diagnostics()
 
 
