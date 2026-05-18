@@ -75,15 +75,21 @@ def load_pdf_documents(pdf_dir: str | Path, markdown_dir: str | Path) -> list[Do
     if not pdf_dir_path.exists():
         return []
 
-    if markdown_dir_path.exists():
-        shutil.rmtree(markdown_dir_path)
-    markdown_dir_path.mkdir(parents=True, exist_ok=True)
+    markdown_dir_path.mkdir(parents=True, exist_ok=True)  # don't wipe it
 
     documents: list[Document] = []
     for pdf_path in sorted(pdf_dir_path.glob("*.pdf")):
-        markdown = extract_pdf_markdown(pdf_path)
         markdown_path = markdown_dir_path / f"{pdf_path.stem}.md"
-        save_markdown(markdown, markdown_path)
+
+        if markdown_path.exists():
+            # If extracted markdown already exists, then just skip it
+            markdown = markdown_path.read_text(encoding="utf-8")
+            print(f"Using cached markdown for {pdf_path.name}")
+        else:
+            markdown = extract_pdf_markdown(pdf_path)
+            save_markdown(markdown, markdown_path)
+            print(f"Extracted markdown for {pdf_path.name}")
+
         documents.append(
             Document(
                 page_content=markdown,

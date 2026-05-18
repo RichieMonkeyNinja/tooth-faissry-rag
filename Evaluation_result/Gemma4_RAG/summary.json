@@ -1,0 +1,37 @@
+{
+  "model": "Gemma4_RAG",
+  "with_rag": true,
+  "input_path": "data\\evals\\qa_eval.csv",
+  "vectorstore_path": "data\\vectorstores\\mixed",
+  "output_metrics": [
+    "context_precision",
+    "context_recall",
+    "faithfulness",
+    "answer_relevancy",
+    "semantic_similarity",
+    "factual_correctness"
+  ],
+  "metric_labels": {
+    "context_precision": "Context Precision",
+    "context_recall": "Context Recall",
+    "faithfulness": "Faithfulness",
+    "answer_relevancy": "Answer Relevancy",
+    "semantic_similarity": "Semantic Similarity",
+    "factual_correctness": "Factual Correctness"
+  },
+  "row_count": 60,
+  "accepted_count": 59,
+  "rejected_count": 1,
+  "source_filter_override": null,
+  "limit": null,
+  "judge_llm_model": "gpt-4o-mini",
+  "embedding_model": "text-embedding-3-small",
+  "metric_means": {
+    "context_precision": 0.7622782812231255,
+    "context_recall": 0.9625,
+    "faithfulness": 0.9111111111111111,
+    "answer_relevancy": 0.9070839147684996,
+    "semantic_similarity": 0.8294060965027593,
+    "factual_correctness": 0.6758333333333333
+  }
+}
