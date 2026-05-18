@@ -1,15 +1,17 @@
 # MedMCQA RAG Chatbot
 
-This project builds a small retrieval-augmented generation (RAG) pipeline over the MedMCQA dataset. It exports the dataset to CSV, embeds each question-explanation pair with OpenAI embeddings, stores the vectors in FAISS, and exposes retrieval through both a terminal script and a Streamlit chatbot.
+This project builds a small retrieval-augmented generation (RAG) pipeline over the MedMCQA dataset and a set of dental PDF reference documents. It exports the dataset to CSV, extracts PDFs to Markdown, stores the mixed corpus in FAISS, and exposes retrieval through both a terminal script and a Streamlit chatbot.
 
 ## What This Project Does
 
 - Exports `train` and `validation` from `openlifescienceai/medmcqa` into a local CSV.
 - Converts each row into a retrievable document using `question` and `exp`.
-- Builds a FAISS vector store with `text-embedding-3-small`.
-- Retrieves the nearest document for a user question.
-- Rejects retrieval if the relevance score is below a hardcoded threshold of `0.6`.
+- Extracts the PDFs in `data/raw/pdf` with MinerU, saves Markdown intermediates, and chunks the extracted text.
+- Builds a mixed FAISS vector store with `text-embedding-3-small`.
+- Retrieves candidate documents with FAISS and BM25, fuses them with RRF, and reranks the top candidates with a cross-encoder.
+- Rejects retrieval if the cross-encoder rerank score is below the configured acceptance threshold.
 - Uses `gpt-4o-mini` to rewrite accepted retrieved context into exactly one grounded sentence.
+- Provides a RAGAS evaluation script for `Context Precision`, `Context Recall`, `Faithfulness`, and `Answer Relevancy`.
 
 ## Tech Stack
 
@@ -21,6 +23,7 @@ This project builds a small retrieval-augmented generation (RAG) pipeline over t
 - OpenAI embeddings: `text-embedding-3-small`
 - OpenAI chat model: `gpt-4o-mini`
 - FAISS for vector search
+- RAGAS for evaluation
 - Streamlit for the chatbot interface
 
 ## Project Structure
@@ -28,10 +31,15 @@ This project builds a small retrieval-augmented generation (RAG) pipeline over t
 ```text
 grp-asgmt/
 |-- data/
+|   |-- evals/
+|   |   |-- qa_eval.csv
+|   |   `-- results/
+|   |-- processed/
+|   |   `-- pdf_markdown/
 |   |-- raw/
 |   |   `-- medmcqa_data.csv
 |   `-- vectorstores/
-|       `-- medmcqa/
+|       `-- mixed/
 |           |-- index.faiss
 |           `-- index.pkl
 |-- src/
@@ -100,24 +108,55 @@ python src/preprocessing.py
 This writes:
 
 ```text
-data/vectorstores/medmcqa/index.faiss
-data/vectorstores/medmcqa/index.pkl
+data/vectorstores/mixed/index.faiss
+data/vectorstores/mixed/index.pkl
 ```
 
 ### 7. Test retrieval from the terminal
 
 ```powershell
-python src/retrieval.py
+python src/retrieval.py --source all
 ```
 
 You will be prompted for a question. The script then:
 
 - loads the saved FAISS index
-- retrieves the nearest document
-- checks whether the relevance score is at least `0.6`
+- retrieves the top 15 FAISS and top 15 BM25 candidates
+- supports `--source all`, `--source pdf`, or `--source medmcqa`
+- fuses candidates with RRF, keeps the top 20, and reranks them with a cross-encoder
+- checks whether the rerank score is at least the configured acceptance threshold
 - either rejects retrieval or generates a one-sentence grounded answer
 
-### 8. Launch the Streamlit chatbot
+### 8. Run RAGAS evaluation
+
+```powershell
+python src/evaluate_ragas.py
+```
+
+The evaluator expects `data/evals/qa_eval.csv` with:
+
+- `question`
+- `reference`
+- `reference_contexts` as a JSON array string
+- optional `source_filter`
+
+It uses `gpt-4o` as the RAGAS judge model and writes per-sample traces and metric summaries to `data/evals/results/` in a timestamped folder.
+
+### 9. Tune the rerank acceptance threshold
+
+```powershell
+python src/tune_rerank_threshold.py
+```
+
+The tuner expects `data/evals/rerank_threshold_eval.csv` with:
+
+- `question`
+- `expected_relevant`
+- optional `notes`
+
+It runs live retrieval against all sources, saves per-question rerank scores, sweeps candidate thresholds, and writes artifacts to `data/evals/results/`.
+
+### 10. Launch the Streamlit chatbot
 
 ```powershell
 streamlit run src/interface.py
@@ -141,7 +180,7 @@ If the top match is sufficiently similar:
 
 ### Rejected retrieval
 
-If the top match is below the `0.6` threshold:
+If the top reranked match is below the rerank acceptance threshold:
 
 - no answer is generated from the LLM
 - the system explicitly reports that no sufficiently similar context was found
@@ -179,8 +218,9 @@ Responsibilities:
 
 - loads the local FAISS vector store
 - embeds the user query
-- retrieves the nearest document with a relevance score
-- rejects matches below the hardcoded threshold of `0.6`
+- retrieves the top 15 vector and top 15 BM25 candidates
+- uses RRF to keep the top 20 fused candidates for cross-encoder reranking
+- rejects matches below the rerank acceptance threshold
 - uses `gpt-4o-mini` only when retrieval is accepted
 - returns the answer, score, retrieved chunk, and metadata
 
@@ -205,8 +245,10 @@ MedMCQA dataset
     -> row-level documents
     -> OpenAI embeddings
     -> FAISS vector store
-    -> nearest-neighbor retrieval
-    -> threshold check
+    -> FAISS top 15 + BM25 top 15 retrieval
+    -> RRF top 20 candidate fusion
+    -> cross-encoder reranking
+    -> rerank acceptance check
     -> grounded one-sentence answer
     -> terminal or Streamlit interface
 ```
@@ -214,25 +256,23 @@ MedMCQA dataset
 ### Retrieval design decisions
 
 - Retrieval unit is one full MedMCQA row, not a chunked fragment.
-- Retrieval uses top `k=1`.
+- Retrieval combines vector and keyword candidates before reranking.
 - Generation is grounded only in the retrieved context.
 - If retrieval confidence is too low, the system rejects instead of hallucinating.
 
 ## Known Limitations
 
-- Retrieval is limited to a single nearest document (`k=1`).
-- The relevance threshold is hardcoded to `0.6`.
+- Reranker acceptance still uses a fixed provisional threshold.
 - Answers are restricted to one sentence only.
-- The system currently works only on the exported MedMCQA CSV.
-- PDF ingestion is planned but not implemented.
+- The system now works over both the exported MedMCQA CSV and the PDFs in `data/raw/pdf`.
+- The evaluation framework still needs curated rows in `data/evals/qa_eval.csv` before it can produce meaningful RAGAS scores.
 - The current project structure still relies on script-level imports rather than a fully packaged module layout.
 
 ## Future Work
 
 - Add PDF ingestion for medical reference documents.
 - Add chunking for long-form sources such as PDFs.
-- Compare retrieval with `k > 1`.
-- Tune the rejection threshold on a validation set instead of using a fixed provisional value.
+- Tune the rerank acceptance threshold on a validation set instead of using a fixed provisional value.
 - Package the `src` directory more cleanly to avoid script-relative import fragility.
 - Change to locally hosted models, including `gemma-4` and `multilingual-embeddings`
 

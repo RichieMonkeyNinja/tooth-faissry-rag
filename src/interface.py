@@ -1,10 +1,17 @@
 import streamlit as st
 from dotenv import load_dotenv
 
-from retrieval import RELEVANCE_THRESHOLD, VECTORSTORE_DIR, answer_question, load_vectorstore
+from retrieval import (
+    NO_GROUNDED_ANSWER_MESSAGE,
+    RERANK_ACCEPT_THRESHOLD,
+    SOURCE_FILTER_ALL,
+    VECTORSTORE_DIR,
+    answer_question,
+    load_vectorstore,
+)
 
 
-st.set_page_config(page_title="MedMCQA RAG Chatbot", page_icon=":stethoscope:", layout="wide")
+st.set_page_config(page_title="Tooth FAISSry: RAG Chatbot", page_icon=":stethoscope:", layout="wide")
 
 
 @st.cache_resource
@@ -35,14 +42,14 @@ def render_diagnostics() -> None:
         return
 
     st.write(f"Accepted: `{result['accepted']}`")
+    st.write(f"Source filter: `{result.get('source_filter', SOURCE_FILTER_ALL)}`")
     st.write(f"Score: `{result['score']:.4f}`")
     st.write(f"Vector score: `{result.get('vector_score', 0.0):.4f}`")
     st.write(f"BM25 score: `{result.get('bm25_score', 0.0):.4f}`")
-    st.write(f"BM25 score softmax: `{result.get('bm25_score_softmax', 0.0):.4f}`")
-    st.write(f"Hybrid score: `{result.get('hybrid_score', 0.0):.4f}`")
+    st.write(f"RRF score: `{result.get('rrf_score', 0.0):.4f}`")
     rerank_score = result.get("rerank_score")
     st.write(f"Rerank score: `{rerank_score:.4f}`" if rerank_score is not None else "Rerank score: `None`")
-    st.write(f"Threshold: `{RELEVANCE_THRESHOLD:.2f}`")
+    st.write(f"Rerank accept threshold: `{RERANK_ACCEPT_THRESHOLD:.2f}`")
     st.write("Retrieved chunk:")
     st.code(result["retrieved_chunk"] or "None", language="text")
     st.write("Metadata:")
@@ -55,34 +62,48 @@ def render_diagnostics() -> None:
 def main() -> None:
     init_session_state()
 
-    st.title("MedMCQA Retrieval Chatbot")
-    st.caption("Answers are generated from hybrid FAISS and BM25 retrieval after cross-encoder reranking.")
+    st.markdown("""
+        <style>
+        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&family=DM+Mono&display=swap');
+        
+        html, body, [class*="css"] {
+            font-family: 'DM Sans', sans-serif;
+        }
+        .stChatMessage {
+            border-radius: 12px;
+            padding: 8px;
+        }
+        </style>
+    """, unsafe_allow_html=True)
+        
+    st.title("Tooth FAISSry Chatbot: A RAG-powered Dental Knowledge Assistant")
+    st.caption("Document Sources: MedMCQA; California Dental Association ")
 
-    chat_col, diagnostics_col = st.columns([2, 1], gap="large")
     vectorstore = get_vectorstore()
 
-    with chat_col:
-        render_messages()
-        question = st.chat_input("Ask a medical question")
+    render_messages()
+    question = st.chat_input("Ask a dental question: e.g. What are the causes of bad breath?")
 
-        if question:
-            st.session_state.messages.append({"role": "user", "content": question})
-            with st.chat_message("user"):
-                st.markdown(question)
+    if question:
+        st.session_state.messages.append({"role": "user", "content": question})
+        with st.chat_message("user"):
+            st.markdown(question)
 
-            result = answer_question(question, vectorstore)
-            st.session_state.latest_result = result
+        with st.spinner("Retrieving answer..."):
+                result = answer_question(question, vectorstore, source_filter='all')
+        st.session_state.latest_result = result
 
-            if result["accepted"]:
-                assistant_message = result["answer"]
-            else:
-                assistant_message = "No sufficiently similar context was found in the database, so no grounded answer was generated."
+        if result["accepted"]:
+            assistant_message = result["answer"]
+        else:
+            assistant_message = NO_GROUNDED_ANSWER_MESSAGE
 
-            st.session_state.messages.append({"role": "assistant", "content": assistant_message})
-            with st.chat_message("assistant"):
-                st.markdown(assistant_message)
+        st.session_state.messages.append({"role": "assistant", "content": assistant_message})
+        with st.chat_message("assistant"):
+            st.markdown(assistant_message)
 
-    with diagnostics_col:
+    with st.sidebar:
+        st.header("🔬 Diagnostics")
         render_diagnostics()
 
 

@@ -1,9 +1,8 @@
 import argparse
 from functools import lru_cache
 from pathlib import Path
+import re
 import sys
-import pandas as pd
-import numpy as np
 from typing import Any
 
 from dotenv import load_dotenv
@@ -15,51 +14,42 @@ from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 import torch
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
-from preprocessing import DATA_PATH
+from preprocessing import (
+    EMBEDDING_MODEL,
+    SOURCE_FILTER_ALL,
+    SOURCE_FILTER_OPTIONS,
+    VECTORSTORE_DIR,
+)
 
 
-VECTORSTORE_DIR = Path("data/vectorstores/medmcqa")
-RELEVANCE_THRESHOLD = 0.6
-EMBEDDING_MODEL = "text-embedding-3-large"
 LLM_MODEL = "gpt-4o-mini"
 RERANKER_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
-INITIAL_RETRIEVAL_K = 8
-BM25_RETRIEVAL_K = 8
-HYBRID_ALPHA = 0.5
+INITIAL_RETRIEVAL_K = 15
+BM25_RETRIEVAL_K = 15
+RRF_K = 60
+RRF_CANDIDATE_K = 20
+RERANK_ACCEPT_THRESHOLD = 3.0
+NO_GROUNDED_ANSWER_MESSAGE = (
+    "No sufficiently similar context was found in the database, so no grounded answer was generated."
+)
 
-def softmax_normalize(scores: dict[str, float], temperature: float = 1.0) -> dict[str, float]:
-    if not scores:
-        return {}
 
-    keys = list(scores.keys())
-    values = np.array([scores[key] for key in keys], dtype=float) / temperature
-    exp_values = np.exp(values - values.max())
-    softmax_values = exp_values / exp_values.sum()
-    return {key: float(value) for key, value in zip(keys, softmax_values, strict=True)}
+def preprocess_bm25(text: str) -> list[str]:
+    return re.findall(r"\b\w+\b", text.lower())
 
-def load_csv_documents(path: str | Path) -> list[Document]:
-    df = pd.read_csv(path)
-    documents: list[Document] = []
 
-    for row_index, row in df.iterrows():
-        documents.append(
-            Document(
-                page_content=(
-                    f"Question: {row['question']}\n"
-                    f"Correct Answer Text: {row['correct_ans']}\n"
-                    # f"Explanation: {row['exp']}"
-                )
-                # metadata={
-                #     "source": str(path),
-                #     "row_index": int(row_index),
-                #     "question": row["question"],
-                #     "correct_answer": row["correct_ans"],
-                #     "doc_type": "medmcqa",
-                # },
-            )
-        )
+def reciprocal_rank_fusion(
+    ranked_lists: list[list[Document]],
+    *,
+    k: int = RRF_K,
+) -> dict[str, float]:
+    fused_scores: dict[str, float] = {}
+    for ranked_documents in ranked_lists:
+        for rank, document in enumerate(ranked_documents, start=1):
+            chunk = document.page_content
+            fused_scores[chunk] = fused_scores.get(chunk, 0.0) + (1.0 / (k + rank))
+    return fused_scores
 
-    return documents
 
 def load_vectorstore(vectorstore_dir: str | Path) -> FAISS:
     embeddings = OpenAIEmbeddings(model=EMBEDDING_MODEL)
@@ -70,9 +60,36 @@ def load_vectorstore(vectorstore_dir: str | Path) -> FAISS:
     )
 
 
+def document_source_matches(document: Document, source_filter: str) -> bool:
+    if source_filter == SOURCE_FILTER_ALL:
+        return True
+    return document.metadata.get("source_type") == source_filter
+
+
+def build_source_filter(source_filter: str) -> dict[str, str] | None:
+    if source_filter == SOURCE_FILTER_ALL:
+        return None
+    return {"source_type": source_filter}
+
+
 @lru_cache(maxsize=1)
-def load_keyword_retriever(data_path: str | Path = DATA_PATH) -> BM25Retriever:
-    retriever = BM25Retriever.from_documents(load_csv_documents(data_path))
+def load_index_documents() -> tuple[Document, ...]:
+    vectorstore = load_vectorstore(VECTORSTORE_DIR)
+    docstore_values = tuple(vectorstore.docstore._dict.values())
+    return tuple(document for document in docstore_values if isinstance(document, Document))
+
+
+@lru_cache(maxsize=3)
+def load_keyword_retriever(source_filter: str = SOURCE_FILTER_ALL) -> BM25Retriever:
+    filtered_documents = [
+        document
+        for document in load_index_documents()
+        if document_source_matches(document, source_filter)
+    ]
+    retriever = BM25Retriever.from_documents(
+        filtered_documents,
+        preprocess_func=preprocess_bm25,
+    )
     retriever.k = BM25_RETRIEVAL_K
     return retriever
 
@@ -114,88 +131,90 @@ def rerank_documents(question: str, documents: list[Document]) -> list[tuple[Doc
     )
     return [(document, float(score)) for document, score in ranked]
 
+
 def retrieve_nearest_chunk(
     question: str,
     vectorstore: FAISS,
-    threshold: float = RELEVANCE_THRESHOLD,
+    source_filter: str = SOURCE_FILTER_ALL,
 ) -> dict[str, Any]:
+    metadata_filter = build_source_filter(source_filter)
     vector_results = vectorstore.similarity_search_with_relevance_scores(
         question,
         k=INITIAL_RETRIEVAL_K,
+        fetch_k=INITIAL_RETRIEVAL_K * 5,
+        filter=metadata_filter,
     )
-    bm25_retriever = load_keyword_retriever()
+
+    bm25_retriever = load_keyword_retriever(source_filter)
     bm25_results = bm25_retriever.invoke(question)
+    processed_query = bm25_retriever.preprocess_func(question)
+    raw_bm25_scores = bm25_retriever.vectorizer.get_scores(processed_query)
 
     if not vector_results and not bm25_results:
         return {
             "answer": None,
             "retrieved_chunk": None,
+            "retrieved_contexts": [],
             "score": 0.0,
             "vector_score": 0.0,
             "bm25_score": 0.0,
-            "bm25_score_softmax": 0.0,
-            "hybrid_score": 0.0,
+            "rrf_score": 0.0,
             "rerank_score": None,
             "accepted": False,
-            "reason": "Hybrid retrieval returned no results",
+            "reason": f"No results found for source filter '{source_filter}'",
+            "metadata": {},
+            "source_filter": source_filter,
         }
 
     vector_scores_by_chunk = {
         document.page_content: float(score) for document, score in vector_results
     }
-    bm25_scores_by_chunk: dict[str, float] = {}
+    bm25_scores_by_chunk = {
+        document.page_content: float(score)
+        for document, score in zip(bm25_retriever.docs, raw_bm25_scores, strict=True)
+    }
     merged_documents: dict[str, Document] = {}
 
     for document, _ in vector_results:
         chunk = document.page_content
         merged_documents[chunk] = document
 
-    for rank, document in enumerate(bm25_results, start=1):
+    for document in bm25_results:
         chunk = document.page_content
         merged_documents.setdefault(chunk, document)
-        bm25_scores_by_chunk[chunk] = float(BM25_RETRIEVAL_K - rank + 1)
 
-    vector_scores_for_candidates = {
-        chunk: vector_scores_by_chunk.get(chunk, 0.0) for chunk in merged_documents
-    }
-    bm25_scores_for_candidates = {
-        chunk: bm25_scores_by_chunk.get(chunk, 0.0) for chunk in merged_documents
-    }
-    softmax_bm25_scores = softmax_normalize(bm25_scores_for_candidates)
-    hybrid_scores_by_chunk = {
-        chunk: HYBRID_ALPHA * softmax_bm25_scores.get(chunk, 0.0)
-        + (1.0 - HYBRID_ALPHA) * vector_scores_for_candidates.get(chunk, 0.0)
-        for chunk in merged_documents
-    }
+    rrf_scores_by_chunk = reciprocal_rank_fusion(
+        [list(bm25_results), [document for document, _ in vector_results]]
+    )
 
     candidate_documents = sorted(
         merged_documents.values(),
-        key=lambda document: hybrid_scores_by_chunk.get(document.page_content, 0.0),
+        key=lambda document: rrf_scores_by_chunk.get(document.page_content, 0.0),
         reverse=True,
-    )
+    )[:RRF_CANDIDATE_K]
     reranked_results = rerank_documents(question, candidate_documents)
     document, rerank_score = reranked_results[0]
+    retrieved_contexts = [document.page_content for document, _ in reranked_results]
     vector_score = vector_scores_by_chunk.get(document.page_content, 0.0)
     bm25_score = bm25_scores_by_chunk.get(document.page_content, 0.0)
-    bm25_score_softmax = softmax_bm25_scores.get(document.page_content, 0.0)
-    hybrid_score = hybrid_scores_by_chunk.get(document.page_content, 0.0)
-    accepted = (
-    rerank_score >= 0.0
-    and (vector_score >= 0.5 or bm25_score >= 5.0)
-    )
+    rrf_score = rrf_scores_by_chunk.get(document.page_content, 0.0)
+    accepted = rerank_score >= RERANK_ACCEPT_THRESHOLD
 
     return {
         "answer": None,
         "retrieved_chunk": document.page_content,
-        "score": float(hybrid_score),
+        "retrieved_contexts": retrieved_contexts,
+        "score": float(rerank_score),
         "vector_score": float(vector_score),
         "bm25_score": float(bm25_score),
-        "bm25_score_softmax": float(bm25_score_softmax),
-        "hybrid_score": float(hybrid_score),
+        "rrf_score": float(rrf_score),
         "rerank_score": float(rerank_score),
         "accepted": accepted,
-        "reason": None if accepted else "No sufficiently similar context found in vector or keyword retrieval",
+        "reason": None
+        if accepted
+        else "No sufficiently similar context found after reranking",
         "metadata": document.metadata,
+        "source_filter": source_filter,
     }
 
 
@@ -225,9 +244,13 @@ def generate_grounded_answer(question: str, retrieved_chunk: str) -> str:
 def answer_question(
     question: str,
     vectorstore: FAISS,
-    threshold: float = RELEVANCE_THRESHOLD,
+    source_filter: str = SOURCE_FILTER_ALL,
 ) -> dict[str, Any]:
-    result = retrieve_nearest_chunk(question, vectorstore, threshold=threshold)
+    result = retrieve_nearest_chunk(
+        question,
+        vectorstore,
+        source_filter=source_filter,
+    )
 
     if not result["accepted"]:
         return result
@@ -242,6 +265,12 @@ def parse_args() -> argparse.Namespace:
         "question",
         nargs="*",
         help="Question to answer. If omitted, retrieval.py reads from interactive input.",
+    )
+    parser.add_argument(
+        "--source",
+        choices=SOURCE_FILTER_OPTIONS,
+        default=SOURCE_FILTER_ALL,
+        help="Restrict retrieval to a source type.",
     )
     return parser.parse_args()
 
@@ -267,14 +296,15 @@ def main() -> None:
         return
 
     vectorstore = load_vectorstore(VECTORSTORE_DIR)
-    result = answer_question(question, vectorstore)
+    result = answer_question(question, vectorstore, source_filter=args.source)
 
+    print(f"Source filter: {result['source_filter']}")
     print(f"Accepted: {result['accepted']}")
     print(f"Score: {result['score']:.4f}")
     print(f"Vector score: {result['vector_score']:.4f}")
     print(f"BM25 score: {result['bm25_score']:.4f}")
-    print(f"BM25 score softmax: {result['bm25_score_softmax']:.4f}")
-    print(f"Hybrid score: {result['hybrid_score']:.4f}")
+    print(f"RRF score: {result['rrf_score']:.4f}")
+    print(f"Rerank score: {result['rerank_score']:.4f}")
     print(f"Retrieved chunk: {result['retrieved_chunk']}")
     print(f"Metadata: {result.get('metadata')}")
 
