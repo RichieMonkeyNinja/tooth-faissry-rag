@@ -19,3 +19,19 @@ Optional columns:
 ```
 
 Evaluation outputs are written under `data/evals/results/` in timestamped subdirectories.
+
+## Rerank Threshold Tuning Input
+
+Use `rerank_threshold_eval.csv` for tuning the cross-encoder acceptance threshold.
+The tuning script always evaluates the full corpus with source filter `all`.
+
+Required columns:
+
+- `question`
+- `expected_relevant`
+
+Optional columns:
+
+- `notes`
+
+`expected_relevant` should be `true` when the corpus should contain an acceptable context for the question, and `false` for out-of-corpus or intentionally unanswerable questions.
