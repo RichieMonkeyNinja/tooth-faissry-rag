@@ -17,3 +17,4 @@ data/raw/*
 data/evals/*
 !data/evals/README.md
 !data/evals/qa_eval.csv
+!data/evals/rerank_threshold_eval.csv
