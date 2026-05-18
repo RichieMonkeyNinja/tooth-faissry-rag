@@ -34,7 +34,7 @@ from retrieval import (
 
 EVAL_INPUT_PATH = Path("data/evals/qa_eval.csv")
 EVAL_OUTPUT_DIR = Path("data/evals/results")
-EVAL_JUDGE_LLM_MODEL = "gpt-4o-mini"
+EVAL_JUDGE_LLM_MODEL = "gpt-4o"
 
 DEFAULT_METRICS = ("context_precision", "context_recall", "faithfulness", "answer_relevancy")
 
@@ -242,8 +242,7 @@ def build_sample(row: EvalRow, vectorstore: Any) -> dict[str, Any]:
         "score": result["score"],
         "vector_score": result["vector_score"],
         "bm25_score": result["bm25_score"],
-        "bm25_score_softmax": result["bm25_score_softmax"],
-        "hybrid_score": result["hybrid_score"],
+        "rrf_score": result["rrf_score"],
         "rerank_score": result["rerank_score"],
         "reason": result["reason"],
         "metadata": json.dumps(result.get("metadata", {}), ensure_ascii=False),

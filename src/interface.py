@@ -2,10 +2,9 @@ import streamlit as st
 from dotenv import load_dotenv
 
 from retrieval import (
-    RELEVANCE_THRESHOLD,
     NO_GROUNDED_ANSWER_MESSAGE,
+    RERANK_ACCEPT_THRESHOLD,
     SOURCE_FILTER_ALL,
-    SOURCE_FILTER_OPTIONS,
     VECTORSTORE_DIR,
     answer_question,
     load_vectorstore,
@@ -47,11 +46,10 @@ def render_diagnostics() -> None:
     st.write(f"Score: `{result['score']:.4f}`")
     st.write(f"Vector score: `{result.get('vector_score', 0.0):.4f}`")
     st.write(f"BM25 score: `{result.get('bm25_score', 0.0):.4f}`")
-    st.write(f"BM25 score softmax: `{result.get('bm25_score_softmax', 0.0):.4f}`")
-    st.write(f"Hybrid score: `{result.get('hybrid_score', 0.0):.4f}`")
+    st.write(f"RRF score: `{result.get('rrf_score', 0.0):.4f}`")
     rerank_score = result.get("rerank_score")
     st.write(f"Rerank score: `{rerank_score:.4f}`" if rerank_score is not None else "Rerank score: `None`")
-    st.write(f"Threshold: `{RELEVANCE_THRESHOLD:.2f}`")
+    st.write(f"Rerank accept threshold: `{RERANK_ACCEPT_THRESHOLD:.2f}`")
     st.write("Retrieved chunk:")
     st.code(result["retrieved_chunk"] or "None", language="text")
     st.write("Metadata:")
