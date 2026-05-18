@@ -281,3 +281,7 @@ MedMCQA dataset
 - The vector store loader uses `allow_dangerous_deserialization=True` when restoring `index.pkl`.
 - This is acceptable for locally generated FAISS artifacts you trust.
 - Do not use that setting to load arbitrary vector store files from untrusted sources.
+
+# Result
+![RAGAS Evaluation Results](Evaluation_result/RAGAS_result.jpg)
+
