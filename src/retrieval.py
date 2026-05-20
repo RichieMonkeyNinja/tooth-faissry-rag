@@ -10,6 +10,7 @@ from langchain_community.retrievers import BM25Retriever
 from langchain_community.vectorstores import FAISS
 from langchain_core.documents import Document
 from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_ollama import ChatOllama
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 import torch
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
@@ -23,6 +24,8 @@ from preprocessing import (
 
 
 LLM_MODEL = "gpt-4o-mini"
+#OLLAMA_MODEL = "gemma4:e4b"
+
 RERANKER_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 INITIAL_RETRIEVAL_K = 15
 BM25_RETRIEVAL_K = 15
@@ -220,6 +223,7 @@ def retrieve_nearest_chunk(
 
 def generate_grounded_answer(question: str, retrieved_chunk: str) -> str:
     llm = ChatOpenAI(model=LLM_MODEL)
+    #llm = ChatOllama(model=OLLAMA_MODEL, num_ctx=2048)
     messages = [
         SystemMessage(
             content=(
